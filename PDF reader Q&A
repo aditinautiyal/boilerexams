@@ -1,0 +1,293 @@
+// PDF Reader and Q&A System using TensorFlow.js
+// Main JavaScript file for web implementation
+
+// Import required libraries
+import * as tf from 'tensorflow';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// PDF processing configuration
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.js';
+
+// Main PDF processor class
+class PDFExamProcessor {
+  constructor() {
+    this.model = null;
+    this.examData = {
+      title: '',
+      type: '',
+      questions: []
+    };
+  }
+
+  async init() {
+    try {
+      // Load TensorFlow model for text classification and extraction
+      this.model = await tf.loadLayersModel('model/exam_parser_model.json');
+      console.log('Model loaded successfully');
+    } catch (error) {
+      console.error('Failed to load model:', error);
+    }
+  }
+
+  async loadPDF(file) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+      const textContent = await this.extractTextFromPDF(pdf);
+      await this.processExamContent(textContent);
+      return this.examData;
+    } catch (error) {
+      console.error('Error loading PDF:', error);
+      throw error;
+    }
+  }
+
+  async extractTextFromPDF(pdf) {
+    let fullText = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+    return fullText;
+  }
+
+  async processExamContent(text) {
+    // Reset exam data
+    this.examData = {
+      title: '',
+      type: '',
+      questions: []
+    };
+
+    // Process text with TensorFlow model to identify components
+    const tokenized = this.preprocessText(text);
+    const predictions = this.model.predict(tokenized);
+    
+    // Extract exam metadata using regex patterns
+    this.examData.title = this.extractExamTitle(text);
+    this.examData.type = this.extractExamType(text);
+    
+    // Extract questions and answers
+    this.extractQuestionsAndAnswers(text);
+    
+    return this.examData;
+  }
+
+  preprocessText(text) {
+    // Simplified preprocessing for TensorFlow input
+    const words = text.toLowerCase().split(/\s+/);
+    const tokenized = tf.tensor2d([words.slice(0, 512).map(w => this.wordToIndex(w))]);
+    return tokenized;
+  }
+  
+  wordToIndex(word) {
+    // Simplified vocabulary mapping
+    const vocabulary = this.getVocabulary();
+    return vocabulary[word] || 0; // 0 is OOV (out of vocabulary)
+  }
+  
+  getVocabulary() {
+    // Vocabulary would be loaded from a file in production
+    return {
+      "exam": 1,
+      "question": 2,
+      "answer": 3,
+      // More words would be defined here
+    };
+  }
+
+  extractExamTitle(text) {
+    // Extract title using regex or model predictions
+    const titleMatch = text.match(/(?:Title|Exam)[:\s]+(.*?)(?:\n|\.)/i);
+    return titleMatch ? titleMatch[1].trim() : 'Untitled Exam';
+  }
+
+  extractExamType(text) {
+    // Extract exam type using regex or model predictions
+    const typeMatch = text.match(/(?:Type|Category|Subject)[:\s]+(.*?)(?:\n|\.)/i);
+    return typeMatch ? typeMatch[1].trim() : 'General Exam';
+  }
+
+  extractQuestionsAndAnswers(text) {
+    // Simple regex pattern for question extraction
+    // In a real implementation, this would use the TensorFlow model for better accuracy
+    const questionPattern = /(?:Q|Question)[\s.:]?(\d+)[.\s:]?(.*?)(?=(?:Q|Question)[\s.:]?\d+|$)/gs;
+    let match;
+    
+    while ((match = questionPattern.exec(text)) !== null) {
+      const questionNumber = match[1];
+      const questionText = match[2].trim();
+      
+      // Extract answer choices
+      const answerChoices = this.extractAnswerChoices(questionText);
+      
+      this.examData.questions.push({
+        number: questionNumber,
+        text: questionText.replace(this.getChoicePattern(), '').trim(),
+        choices: answerChoices
+      });
+    }
+  }
+
+  extractAnswerChoices(questionText) {
+    const choices = [];
+    const choicePattern = this.getChoicePattern();
+    let match;
+    
+    while ((match = choicePattern.exec(questionText)) !== null) {
+      choices.push({
+        label: match[1],
+        text: match[2].trim()
+      });
+    }
+    
+    return choices;
+  }
+
+  getChoicePattern() {
+    return /(?:^|\n)([A-D])[\s.:]+(.*?)(?=(?:\n[A-D][\s.:]|$))/gs;
+  }
+}
+
+// UI Integration
+class ExamUI {
+  constructor() {
+    this.processor = new PDFExamProcessor();
+    this.currentQuestionIndex = 0;
+  }
+
+  async init() {
+    await this.processor.init();
+    this.setupEventListeners();
+  }
+
+  setupEventListeners() {
+    const fileInput = document.getElementById('pdf-upload');
+    fileInput.addEventListener('change', this.handleFileUpload.bind(this));
+    
+    document.getElementById('next-btn').addEventListener('click', this.showNextQuestion.bind(this));
+    document.getElementById('prev-btn').addEventListener('click', this.showPrevQuestion.bind(this));
+    document.getElementById('submit-btn').addEventListener('click', this.submitAnswers.bind(this));
+  }
+
+  async handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (file && file.type === 'application/pdf') {
+      try {
+        document.getElementById('loading').style.display = 'block';
+        const examData = await this.processor.loadPDF(file);
+        this.renderExamData(examData);
+        document.getElementById('loading').style.display = 'none';
+      } catch (error) {
+        console.error('Error processing PDF:', error);
+        alert('Failed to process PDF file');
+        document.getElementById('loading').style.display = 'none';
+      }
+    } else {
+      alert('Please upload a valid PDF file');
+    }
+  }
+
+  renderExamData(examData) {
+    // Display exam metadata
+    document.getElementById('exam-title').textContent = examData.title;
+    document.getElementById('exam-type').textContent = examData.type;
+    
+    // Setup question navigation
+    this.examData = examData;
+    this.currentQuestionIndex = 0;
+    
+    // Show first question
+    this.renderQuestion(this.currentQuestionIndex);
+    
+    // Show exam container
+    document.getElementById('exam-container').style.display = 'block';
+  }
+
+  renderQuestion(index) {
+    if (!this.examData || !this.examData.questions.length) return;
+    
+    const question = this.examData.questions[index];
+    const questionContainer = document.getElementById('question-container');
+    
+    // Update question counter
+    document.getElementById('question-counter').textContent = 
+      `Question ${index + 1} of ${this.examData.questions.length}`;
+    
+    // Clear previous question
+    questionContainer.innerHTML = '';
+    
+    // Create question text element
+    const questionText = document.createElement('div');
+    questionText.className = 'question-text';
+    questionText.textContent = `Q${question.number}. ${question.text}`;
+    questionContainer.appendChild(questionText);
+    
+    // Create answer choices
+    const choicesContainer = document.createElement('div');
+    choicesContainer.className = 'choices-container';
+    
+    question.choices.forEach(choice => {
+      const choiceElement = document.createElement('div');
+      choiceElement.className = 'choice';
+      
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = `question-${index}`;
+      radio.value = choice.label;
+      radio.id = `choice-${index}-${choice.label}`;
+      
+      const label = document.createElement('label');
+      label.htmlFor = `choice-${index}-${choice.label}`;
+      label.textContent = `${choice.label}. ${choice.text}`;
+      
+      choiceElement.appendChild(radio);
+      choiceElement.appendChild(label);
+      choicesContainer.appendChild(choiceElement);
+    });
+    
+    questionContainer.appendChild(choicesContainer);
+    
+    // Update navigation buttons
+    document.getElementById('prev-btn').disabled = index === 0;
+    document.getElementById('next-btn').disabled = index === this.examData.questions.length - 1;
+  }
+
+  showNextQuestion() {
+    if (this.currentQuestionIndex < this.examData.questions.length - 1) {
+      this.currentQuestionIndex++;
+      this.renderQuestion(this.currentQuestionIndex);
+    }
+  }
+
+  showPrevQuestion() {
+    if (this.currentQuestionIndex > 0) {
+      this.currentQuestionIndex--;
+      this.renderQuestion(this.currentQuestionIndex);
+    }
+  }
+
+  submitAnswers() {
+    const answers = [];
+    
+    for (let i = 0; i < this.examData.questions.length; i++) {
+      const selected = document.querySelector(`input[name="question-${i}"]:checked`);
+      answers.push({
+        questionNumber: this.examData.questions[i].number,
+        selectedAnswer: selected ? selected.value : null
+      });
+    }
+    
+    // In a real app, you would send these answers to a server
+    console.log('Submitted answers:', answers);
+    alert('Exam submitted successfully!');
+  }
+}
+
+// Initialize application
+document.addEventListener('DOMContentLoaded', async () => {
+  const examUI = new ExamUI();
+  await examUI.init();
+});
