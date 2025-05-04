@@ -1,0 +1,134 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <tensorflow/c/c_api.h>
+#include <poppler/cpp/poppler-document.h>
+#include <poppler/cpp/poppler-page.h>
+#include <poppler/cpp/poppler-page-renderer.h>
+
+#define MAX_TEXT_LENGTH 1000000
+#define MAX_TITLE_LENGTH 1024
+#define MAX_QUESTION_LENGTH 4096
+#define MAX_ANSWER_LENGTH 1024
+#define MAX_QUESTIONS 1000
+#define MAX_ANSWERS 10
+
+typedef struct {
+    char label;
+    char text[MAX_ANSWER_LENGTH];
+} Answer;
+
+typedef struct {
+    int number;
+    char text[MAX_QUESTION_LENGTH];
+    Answer answers[MAX_ANSWERS];
+    int answerCount;
+} Question;
+
+typedef struct {
+    char title[MAX_TITLE_LENGTH];
+    char examType[MAX_TITLE_LENGTH];
+    Question questions[MAX_QUESTIONS];
+    int questionCount;
+} ExamData;
+
+void check_tensorflow_status(TF_Status* status) {
+    if (TF_GetCode(status) != TF_OK) {
+        fprintf(stderr, "TensorFlow Error: %s\n", TF_Message(status));
+        exit(1);
+    }
+}
+
+TF_Session* load_tensorflow_model(const char* model_path) {
+    TF_Status* status = TF_NewStatus();
+    TF_Graph* graph = TF_NewGraph();
+    
+    TF_SessionOptions* session_opts = TF_NewSessionOptions();
+    TF_Buffer* run_opts = NULL;
+    
+    TF_Session* session = TF_LoadSessionFromSavedModel(
+        session_opts, run_opts, model_path, 
+        &"serve", 1, graph, NULL, status
+    );
+    
+    check_tensorflow_status(status);
+    TF_DeleteStatus(status);
+    TF_DeleteSessionOptions(session_opts);
+    
+    return session;
+}
+
+void free_tensorflow_resources(TF_Session* session, TF_Graph* graph) {
+    TF_Status* status = TF_NewStatus();
+    TF_CloseSession(session, status);
+    check_tensorflow_status(status);
+    TF_DeleteSession(session, status);
+    check_tensorflow_status(status);
+    TF_DeleteGraph(graph);
+    TF_DeleteStatus(status);
+}
+
+char* extract_text_from_pdf(const char* pdf_path) {
+    poppler::document* doc = poppler::document::load_from_file(pdf_path);
+    if (!doc) {
+        fprintf(stderr, "Failed to load PDF: %s\n", pdf_path);
+        return NULL;
+    }
+    
+    char* text_buffer = (char*)malloc(MAX_TEXT_LENGTH * sizeof(char));
+    if (!text_buffer) {
+        fprintf(stderr, "Memory allocation failed\n");
+        delete doc;
+        return NULL;
+    }
+    
+    text_buffer[0] = '\0';
+    int offset = 0;
+    
+    for (int i = 0; i < doc->pages(); ++i) {
+        poppler::page* page = doc->create_page(i);
+        if (!page) continue;
+        
+        std::string page_text = page->text().to_latin1();
+        int len = page_text.length();
+        
+        if (offset + len + 1 < MAX_TEXT_LENGTH) {
+            strncpy(text_buffer + offset, page_text.c_str(), len);
+            offset += len;
+            text_buffer[offset++] = '\n';
+            text_buffer[offset] = '\0';
+        } else {
+            fprintf(stderr, "Text buffer overflow, truncating\n");
+            break;
+        }
+        
+        delete page;
+    }
+    
+    delete doc;
+    return text_buffer;
+}
+
+float* run_inference(TF_Session* session, const char* text) {
+    TF_Status* status = TF_NewStatus();
+    TF_Graph* graph = TF_SessionGraph(session);
+    
+    // Preprocess text (tokenization and padding)
+    // This is a simplified placeholder - actual implementation
+    // would convert text to numeric tensors based on vocabulary
+    
+    // Create input tensor
+    int64_t dims[] = {1, strlen(text)};
+    TF_Tensor* input_tensor = TF_AllocateTensor(
+        TF_FLOAT, dims, 2, sizeof(float) * dims[0] * dims[1]
+    );
+    
+    // Copy data to input tensor
+    // Simplified for example
+    
+    // Run inference
+    const char* input_op_name = "serving_default_input_1";
+    const char* output_op_name = "StatefulPartitionedCall";
+    
+    TF_Output input_op = {TF
