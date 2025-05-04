@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Exam Reader</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <header>
+      <h1>PDF Exam Reader</h1>
+      <p>Upload an exam PDF to automatically extract questions and answers</p>
+    </header>
+
+    <div class="upload-section">
+      <label for="pdf-upload" class="upload-btn">Choose PDF File</label>
+      <input type="file" id="pdf-upload" accept="application/pdf" hidden>
+      <p class="file-name">No file selected</p>
+    </div>
+
+    <div id="loading" class="loading-indicator">
+      <div class="spinner"></div>
+      <p>Processing PDF...</p>
+    </div>
+
+    <div id="exam-container" class="exam-container">
+      <div class="exam-header">
+        <h2 id="exam-title">Exam Title</h2>
+        <p id="exam-type">Exam Type</p>
+      </div>
+
+      <div class="question-section">
+        <div class="question-header">
+          <span id="question-counter">Question 1 of 10</span>
+        </div>
+
+        <div id="question-container" class="question-container">
+          <!-- Question content will be inserted here -->
+        </div>
+
+        <div class="navigation-buttons">
+          <button id="prev-btn" class="nav-btn">Previous</button>
+          <button id="next-btn" class="nav-btn">Next</button>
+        </div>
+      </div>
+
+      <div class="submit-section">
+        <button id="submit-btn" class="submit-btn">Submit Answers</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+  <script src="main.js" type="module"></script>
+</body>
+</html>
