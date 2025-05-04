@@ -1,0 +1,155 @@
+# TensorFlow model creator for PDF exam parser
+# This script creates and trains a model to extract exam components
+# Run this once to generate model files for the web application
+
+import tensorflow as tf
+import numpy as np
+import os
+import json
+import re
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, LSTM, Embedding, Bidirectional, Dropout
+
+# Constants
+MAX_VOCAB_SIZE = 10000
+MAX_SEQUENCE_LENGTH = 512
+EMBEDDING_DIM = 128
+LSTM_UNITS = 64
+NUM_CLASSES = 5  # Title, Type, Question, Answer, Other
+
+# Class mapping
+CLASS_MAPPING = {
+    0: "Other",
+    1: "Title",
+    2: "Type",
+    3: "Question",
+    4: "Answer"
+}
+
+def load_training_data(data_dir):
+    """Load training data from directory"""
+    texts = []
+    labels = []
+    
+    # In a real implementation, you'd load annotated PDF exam data
+    # This is a simplified example
+    
+    # Sample data
+    sample_data = [
+        ("Final Examination: Computer Science 101", 1),  # Title
+        ("Type: Multiple Choice", 2),  # Type
+        ("Question 1: What is the time complexity of quicksort?", 3),  # Question
+        ("A. O(n)", 4),  # Answer
+        ("B. O(n log n)", 4),  # Answer
+        ("C. O(n²)", 4),  # Answer
+        ("D. O(1)", 4),  # Answer
+        ("Question 2: Which data structure uses LIFO?", 3),  # Question
+        # Add more samples...
+    ]
+    
+    for text, label in sample_data:
+        texts.append(text)
+        labels.append(label)
+    
+    return texts, labels
+
+def preprocess_data(texts, labels):
+    """Preprocess text data for model training"""
+    # Create tokenizer
+    tokenizer = Tokenizer(num_words=MAX_VOCAB_SIZE, oov_token="<OOV>")
+    tokenizer.fit_on_texts(texts)
+    
+    # Convert texts to sequences
+    sequences = tokenizer.texts_to_sequences(texts)
+    
+    # Pad sequences
+    padded_sequences = pad_sequences(sequences, maxlen=MAX_SEQUENCE_LENGTH, padding='post')
+    
+    # Convert labels to numpy array
+    labels = np.array(labels)
+    
+    # One-hot encode labels
+    one_hot_labels = tf.keras.utils.to_categorical(labels, num_classes=NUM_CLASSES+1)
+    
+    return padded_sequences, one_hot_labels, tokenizer
+
+def create_model(vocab_size, embedding_dim, lstm_units, num_classes):
+    """Create and compile model"""
+    model = Sequential([
+        Embedding(vocab_size, embedding_dim, input_length=MAX_SEQUENCE_LENGTH),
+        Bidirectional(LSTM(lstm_units, return_sequences=True)),
+        Dropout(0.2),
+        Bidirectional(LSTM(lstm_units)),
+        Dropout(0.2),
+        Dense(lstm_units, activation='relu'),
+        Dense(num_classes, activation='softmax')
+    ])
+    
+    model.compile(
+        loss='categorical_crossentropy',
+        optimizer='adam',
+        metrics=['accuracy']
+    )
+    
+    return model
+
+def train_model():
+    """Train the model and save it"""
+    # Load and preprocess data
+    texts, labels = load_training_data("training_data")
+    X, y, tokenizer = preprocess_data(texts, labels)
+    
+    # Split data
+    from sklearn.model_selection import train_test_split
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # Create model
+    model = create_model(
+        vocab_size=MAX_VOCAB_SIZE + 1,  # +1 for OOV token
+        embedding_dim=EMBEDDING_DIM,
+        lstm_units=LSTM_UNITS,
+        num_classes=NUM_CLASSES + 1  # +1 for "Other" class
+    )
+    
+    # Train model
+    history = model.fit(
+        X_train, y_train,
+        validation_data=(X_val, y_val),
+        epochs=10,
+        batch_size=32
+    )
+    
+    # Save model
+    output_dir = "model"
+    os.makedirs(output_dir, exist_ok=True)
+    model.save(os.path.join(output_dir, "exam_parser_model.h5"))
+    
+    # Save vocabulary for later use
+    vocab = tokenizer.word_index
+    with open(os.path.join(output_dir, "vocabulary.json"), "w") as f:
+        json.dump(vocab, f)
+    
+    # Convert model to TensorFlow.js format for web use
+    import tensorflowjs as tfjs
+    tfjs.converters.save_keras_model(model, output_dir)
+    
+    print(f"Model saved to {output_dir}")
+    print(f"Vocabulary size: {len(vocab)}")
+
+def test_model(test_pdf_path):
+    """Test the model on a sample PDF"""
+    # In a real implementation, this would extract text from a PDF
+    # and run inference with the model
+    print(f"Testing model on {test_pdf_path}...")
+    # Implementation details would vary based on PDF library
+
+if __name__ == "__main__":
+    # Train the model
+    train_model()
+    
+    # Test on sample PDF if provided
+    import sys
+    if len(sys.argv) > 1:
+        test_model(sys.argv[1])
